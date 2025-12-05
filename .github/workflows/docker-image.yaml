@@ -13,12 +13,6 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Set up Docker
-        id: setup_docker
-        run: |
-          echo "Setting up Docker environment"
-          sudo apt install docker.io -y
-
       - name: Log in to Docker Hub
         id: log_to_hub
         uses: docker/login-action@v3

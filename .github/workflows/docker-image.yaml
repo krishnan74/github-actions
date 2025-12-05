@@ -3,7 +3,7 @@ name: Build and Push Docker Image
 on:
   push:
     branches:
-      - main        
+      - main
 
 jobs:
   create-image-and-upload:
@@ -23,7 +23,6 @@ jobs:
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_TOKEN }}
-        needs: setup_docker
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
@@ -31,4 +30,3 @@ jobs:
           context: ./docker
           push: true
           tags: "${{ secrets.DOCKER_USERNAME }}/github-actions:latest-${{ github.sha }}"
-        needs: log_to_hub

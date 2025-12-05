@@ -1,10 +1,10 @@
-name: Hello World Workflow
+# name: Hello World Workflow
 
-on: [push]
+# on: [push]
 
-jobs:
-  greet:
-    runs-on: self-hosted
-    steps:
-      - name: Say Hello
-        run: echo "Hello, World!"
+# jobs:
+#   greet:
+#     runs-on: self-hosted
+#     steps:
+#       - name: Say Hello
+#         run: echo "Hello, World!"

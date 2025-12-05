@@ -1,0 +1,14 @@
+# Ignore local git metadata
+.git
+
+# Ignore temporary and OS files
+.DS_Store
+*.swp
+
+# Ignore node modules and other large folders that shouldn't be sent to Docker
+node_modules
+
+# Project-level files that are not required in image
+README.md
+demo.txt
+upload

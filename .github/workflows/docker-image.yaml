@@ -15,7 +15,9 @@ jobs:
 
       - name: Set up Docker
         id: setup_docker
-        uses: docker/setup-docker-action@v4
+        run: |
+          echo "Setting up Docker environment"
+          sudo apt install docker.io -y
 
       - name: Log in to Docker Hub
         id: log_to_hub

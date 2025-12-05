@@ -13,12 +13,9 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2
-
-      - name: Set up Docker Buildx
-        id: setup_buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Set up Docker
+        id: setup_docker
+        uses: docker/setup-docker-action@v4
 
       - name: Log in to Docker Hub
         id: log_to_hub

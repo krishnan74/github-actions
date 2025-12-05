@@ -2,121 +2,75 @@ name: Deploy S3 Bucket
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
 
 permissions:
-  id-token: write     
+  id-token: write
   contents: read
 
 jobs:
   deploy-s3:
     runs-on: self-hosted
     env:
-      REPO_VAR_BUCKET_NAME: ${{ vars.BUCKET_NAME || '' }}
-      REPO_VAR_ENVIRONMENT: ${{ vars.ENVIRONMENT || '' }}
+      BUCKET_NAME: ${{ vars.BUCKET_NAME }}
+      ENVIRONMENT: ${{ vars.ENVIRONMENT }}
       AWS_REGION: us-east-1
 
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Install AWS CLI v2 if missing
+      - name: Ensure AWS CLI v2
         run: |
           set -euo pipefail
-
           if command -v aws >/dev/null 2>&1; then
-            echo "aws CLI already installed: $(aws --version 2>&1)"
+            echo "aws present: $(aws --version 2>&1)"
             exit 0
           fi
-
-          echo "aws CLI not found — installing AWS CLI v2..."
-
-          # Install prerequisites if needed (using apt-get where available)
-          if command -v apt-get >/dev/null 2>&1; then
-            sudo apt-get update -y
-            sudo apt-get install -y unzip curl
-          fi
-
-          TMPDIR=$(mktemp -d)
-          cd "$TMPDIR"
-          curl -sS "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
-          unzip awscliv2.zip
-          sudo ./aws/install --update
-
-          echo "Installed: $(aws --version)"
-          cd - >/dev/null
-          rm -rf "$TMPDIR"
+          echo "Installing AWS CLI v2..."
+          TMP=$(mktemp -d)
+          curl -sS https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o "$TMP/awscliv2.zip"
+          unzip -q "$TMP/awscliv2.zip" -d "$TMP"
+          sudo "$TMP/aws/install" --update
+          aws --version
+          rm -rf "$TMP"
 
       - name: Configure AWS Credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::853973692277:role/Github-OIDC-Role
           role-session-name: github-actions
-          aws-region: us-east-1
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Create S3 bucket
+      - name: Create bucket if missing (enable versioning for prod)
         run: |
           set -euo pipefail
-
-          if [ -n "${BUCKET_NAME-}" ]; then
-            BUCKET="$BUCKET_NAME"
-          elif [ -n "${PIPELINE_BUCKET_NAME-}" ]; then
-            BUCKET="$PIPELINE_BUCKET_NAME"
-          elif [ -n "${REPO_VAR_BUCKET_NAME-}" ]; then
-            BUCKET="$REPO_VAR_BUCKET_NAME"
-          else
-            BUCKET="dk-feature-bucket-$(date +'%Y%m%d%H%M%S')"
+          BUCKET="${BUCKET_NAME:-}"
+          if [ -z "$BUCKET" ]; then
+            BUCKET="dk-feature-bucket-$(date +%Y%m%d%H%M%S)"
           fi
-
-          if [ -n "${ENVIRONMENT-}" ]; then
-            ENV="$ENVIRONMENT"
-          elif [ -n "${PIPELINE_ENVIRONMENT-}" ]; then
-            ENV="$PIPELINE_ENVIRONMENT"
-          elif [ -n "${REPO_VAR_ENVIRONMENT-}" ]; then
-            ENV="$REPO_VAR_ENVIRONMENT"
-          else
-            ENV="dev"
-          fi
-
-          echo "Determined BUCKET_NAME=$BUCKET"
-          echo "Determined ENVIRONMENT=$ENV"
-
+          ENV="${ENVIRONMENT:-dev}"
           echo "BUCKET_NAME=$BUCKET" >> $GITHUB_ENV
           echo "ENVIRONMENT=$ENV" >> $GITHUB_ENV
 
-          # Create the bucket only if it does not already exist
           if aws s3api head-bucket --bucket "$BUCKET" 2>/dev/null; then
-            echo "Bucket '$BUCKET' already exists — skipping creation."
+            echo "Bucket exists: $BUCKET"
           else
-            echo "Creating bucket '$BUCKET' in region '$AWS_REGION'..."
-            if [ "$AWS_REGION" = "us-east-1" ]; then
+            echo "Creating bucket: $BUCKET"
+            if [ "${AWS_REGION}" = "us-east-1" ]; then
               aws s3api create-bucket --bucket "$BUCKET" --region "$AWS_REGION"
             else
-              aws s3api create-bucket --bucket "$BUCKET" --region "$AWS_REGION" \
-                --create-bucket-configuration LocationConstraint=$AWS_REGION
+              aws s3api create-bucket --bucket "$BUCKET" --region "$AWS_REGION" --create-bucket-configuration LocationConstraint=$AWS_REGION
             fi
-            echo "Bucket created: $BUCKET"
           fi
 
-          # Enable versioning only for production environment
           if [ "${ENV,,}" = "prod" ] || [ "${ENV,,}" = "production" ]; then
-            echo "Enabling versioning on bucket '$BUCKET' (environment: $ENV)"
-            aws s3api put-bucket-versioning --bucket "$BUCKET" \
-              --versioning-configuration Status=Enabled
-          else
-            echo "Not enabling versioning for environment: $ENV"
+            echo "Enabling versioning on $BUCKET"
+            aws s3api put-bucket-versioning --bucket "$BUCKET" --versioning-configuration Status=Enabled
           fi
 
-      - name: Upload file to S3
+      - name: Upload files to S3
         run: |
           set -euo pipefail
-
-          if [ -z "${BUCKET_NAME-}" ]; then
-            echo "BUCKET_NAME is not set. Did the previous step fail?" >&2
-            exit 1
-          fi
-
-          # Upload all files from the upload/ directory to the bucket root
-          echo "Uploading contents of ./upload/ to s3://$BUCKET_NAME/"
+          echo "Uploading ./upload/ to s3://$BUCKET_NAME/"
           aws s3 cp ./upload/ "s3://$BUCKET_NAME/" --recursive

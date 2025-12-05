@@ -1,0 +1,95 @@
+name: Deploy S3 Bucket
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  id-token: write     
+  contents: read
+
+jobs:
+  deploy-s3:
+    runs-on: self-hosted
+    env:
+      REPO_VAR_BUCKET_NAME: ${{ vars.BUCKET_NAME || '' }}
+      REPO_VAR_ENVIRONMENT: ${{ vars.ENVIRONMENT || '' }}
+      AWS_REGION: us-east-1
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::853973692277:role/Github-OIDC-Role
+          role-session-name: github-actions
+          aws-region: us-east-1
+
+      - name: Create S3 bucket
+        run: |
+          set -euo pipefail
+
+          if [ -n "${BUCKET_NAME-}" ]; then
+            BUCKET="$BUCKET_NAME"
+          elif [ -n "${PIPELINE_BUCKET_NAME-}" ]; then
+            BUCKET="$PIPELINE_BUCKET_NAME"
+          elif [ -n "${REPO_VAR_BUCKET_NAME-}" ]; then
+            BUCKET="$REPO_VAR_BUCKET_NAME"
+          else
+            BUCKET="dk-feature-bucket-$(date +'%Y%m%d%H%M%S')"
+          fi
+
+          if [ -n "${ENVIRONMENT-}" ]; then
+            ENV="$ENVIRONMENT"
+          elif [ -n "${PIPELINE_ENVIRONMENT-}" ]; then
+            ENV="$PIPELINE_ENVIRONMENT"
+          elif [ -n "${REPO_VAR_ENVIRONMENT-}" ]; then
+            ENV="$REPO_VAR_ENVIRONMENT"
+          else
+            ENV="dev"
+          fi
+
+          echo "Determined BUCKET_NAME=$BUCKET"
+          echo "Determined ENVIRONMENT=$ENV"
+
+          echo "BUCKET_NAME=$BUCKET" >> $GITHUB_ENV
+          echo "ENVIRONMENT=$ENV" >> $GITHUB_ENV
+
+          # Create the bucket only if it does not already exist
+          if aws s3api head-bucket --bucket "$BUCKET" 2>/dev/null; then
+            echo "Bucket '$BUCKET' already exists — skipping creation."
+          else
+            echo "Creating bucket '$BUCKET' in region '$AWS_REGION'..."
+            if [ "$AWS_REGION" = "us-east-1" ]; then
+              aws s3api create-bucket --bucket "$BUCKET" --region "$AWS_REGION"
+            else
+              aws s3api create-bucket --bucket "$BUCKET" --region "$AWS_REGION" \
+                --create-bucket-configuration LocationConstraint=$AWS_REGION
+            fi
+            echo "Bucket created: $BUCKET"
+          fi
+
+          # Enable versioning only for production environment
+          if [ "${ENV,,}" = "prod" ] || [ "${ENV,,}" = "production" ]; then
+            echo "Enabling versioning on bucket '$BUCKET' (environment: $ENV)"
+            aws s3api put-bucket-versioning --bucket "$BUCKET" \
+              --versioning-configuration Status=Enabled
+          else
+            echo "Not enabling versioning for environment: $ENV"
+          fi
+
+      - name: Upload file to S3
+        run: |
+          set -euo pipefail
+
+          if [ -z "${BUCKET_NAME-}" ]; then
+            echo "BUCKET_NAME is not set. Did the previous step fail?" >&2
+            exit 1
+          fi
+
+          # Upload all files from the upload/ directory to the bucket root
+          echo "Uploading contents of ./upload/ to s3://$BUCKET_NAME/"
+          aws s3 cp ./upload/ "s3://$BUCKET_NAME/" --recursive
